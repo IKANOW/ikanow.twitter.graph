@@ -1,0 +1,267 @@
+<!--
+Copyright 2012 The Infinit.e Open Source Project
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+		<title>IKANOW.Twitter.Graph</title>
+		
+	    <link href="lib/bootstrap/css/bootstrap.css" rel="stylesheet">
+	    <link href="lib/base.css" rel="stylesheet">
+	    <link href="lib/bootstrap/css/bootstrap-responsive.css" rel="stylesheet">
+	    
+	    <!-- Le HTML5 shim, for IE6-8 support of HTML5 elements -->
+	    <!--[if lt IE 9]>
+	      <script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+	    <![endif]-->
+	    
+	    <script type="text/javascript" src="lib/settings.js"></script>
+	    <script type="text/javascript" src="lib/bootstrap/js/bootstrap.min.js"></script>
+	    <script type="text/javascript" src="lib/bootstrap/js/jquery-latest.js"></script>
+		<script src="http://malsup.github.com/jquery.blockUI.js"></script>
+
+	</head>
+	<body>
+	
+	<div class="container">
+		<div class="main-div">
+			<table width="100%" cellpadding="0" cellspacing="0">
+			<tr style="background-color:#000000;border-bottom-width: 1px; border-bottom-style:dotted; border-bottom-color:#707070;">
+				<td width="100%">
+					<img src="image/twittergraph_logo.png">
+				</td>
+			</tr>
+			<tr style="background-color:#000000;border-bottom-width: 1px; border-bottom-style:dotted; border-bottom-color:#707070;">
+				<td>
+				
+				<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#000000;">
+				<tr valign="top">
+					<td width="300">		
+						<div id="map_canvas" style="height:400px; width:300px; border:1px solid;"></div>
+					</td>
+					<td width="300">
+						
+					</td>
+					<td width="90%"></td>
+				</tr>
+				</table>
+				
+				</td>
+			</tr>
+			<tr style="background-color:#000000;">
+				<td width="100%" align="center">
+					&nbsp;
+				</td>
+			</tr>
+			</table>
+		</div>
+	</div>
+
+	</body>
+</html>
+
+
+<!---------- Javascript Code ---------->
+<script>
+	
+	var apiRoot = "http://ikanow.api.mashery.com/"; 
+	var docsToRetrieve = 1000;
+	var currentCommunityId = null;
+	var documents = null;
+	var map = null;
+	var locations = null;
+	var places = new Array();
+	var twitterHandles = new Array();
+	
+	
+	$(document).ready(function () {
+		querySourcesByCommunity("50eeb676e4b0ca7c2bd16ce6");
+	});
+
+
+    
+	// initializeMap -
+	function initializeMap() {
+    	var mapOptions = {
+        	zoom: 5,
+        	disableDefaultUI: false,
+       		center: new google.maps.LatLng( 40.42, -74.0 ),
+        	mapTypeId: google.maps.MapTypeId.HYBRID
+      	};
+      	map = new google.maps.Map(document.getElementById('map_canvas'), mapOptions);
+      	
+      	// Create heatmap data from places array
+		var heatMapData = null;
+		if (places.length > 0) {
+			heatMapData = new Array();
+			for (var i=0; i < places.length; i++) {
+				heatMapData.push( new google.maps.LatLng(places[i].lat, places[i].lon) );
+			}
+		}
+		
+		var heatmap = new google.maps.visualization.HeatmapLayer({
+			  data: heatMapData,
+			  dissipating: true,
+			  radius: 30,
+			  map: map
+		});
+    }
+	
+    
+	// loadMap -
+    function loadMap() {
+    	$('.googleScript').remove();
+    	var script = document.createElement("script");
+    	script.setAttribute('id', 'googleScript');
+    	script.type = "text/javascript";
+    	script.src = "https://maps.googleapis.com/maps/api/js?key=" + googleApiKey + 
+    			"&libraries=visualization&sensor=false&callback=initializeMap";
+    	document.body.appendChild(script);
+	}
+	
+
+	
+	// querySourcesByCommunity -
+	// Each topic header represents a community in Infinit.e, clicking on a topic causes
+	// the application to do an * query on all of the sources in the corresponding community
+	function querySourcesByCommunity( communityId )
+	{
+		// UI Blocker for AJAX Call 
+		$.blockUI({ message: '<h4><img src="image/busy.gif" /> Retrieving data...</h4>' });
+		
+		if (currentCommunityId != communityId) { currentPage = 1;}
+		currentCommunityId = communityId;
+
+		var documentDivHtml = "";
+		var apiAddress = apiRoot + "api/knowledge/document/query/" + communityId;
+		var apiData = "infinite_api_key=" + apiKey + "&output.docs.numReturn=" + docsToRetrieve
+			+ "&score.sigWeight=0&score.relWeight=0";
+
+		
+		var response = $.ajax({
+			type: 'GET',
+			url: apiAddress,
+			data: apiData,
+			async: true,
+			contentType: "application/json",
+			dataType: 'jsonp',
+			jsonp: 'jsonp',
+			success: function(msg) {
+				if (msg.response != null && msg.response.success == true) {
+					if (msg.response.success == true) {
+						documents = msg.data;
+						for (var i = 0; i < documents.length; i++) {
+							extractDataDocument(documents[i]);
+						}
+						loadMap();
+					}
+				}
+				// Unblock UI
+				$.unblockUI();
+			}
+		});
+		
+	}
+
+	
+	// sortByProperty -
+	function sortByProperty( arr, property, descending )
+	{
+	  arr.sort( function( a, b )
+	  {
+	    return Boolean( descending )
+	      ? b[property] - a[property]
+	      : a[property] - b[property]
+	  } );
+	}
+
+
+	// extractEntitiesFromDocument
+	function extractDataDocument( document) {
+		if (document.entities != null) {
+			for (var i=0; i < document.entities.length; i++) {
+				
+				// TwitterHandle
+				if (document.entities[i].type == "TwitterHandle") {
+					var handle = "@" + document.entities[i].disambiguated_name;
+					twitterHandles.push( { handle : 1 } );
+				}
+				
+				// geotag
+				if (document.entities[i].geotag != null) {
+					places.push( document.entities[i].geotag );
+				}
+				
+			}
+		}
+	}
+	
+	
+	
+	
+	// addPlaces -
+	function addPlaces( document ) {
+		if (document.entities != null) {
+			for (var i=0; i < document.entities.length; i++) {
+				if (document.entities[i].geotag != null) {
+					var newPlace = createEntity( document.entities[i] );
+					if ( places.length == 0 ) { places.push( newPlace ); }
+					else
+					{ 	// Only take new places, don't add duplicates
+						var result = $.grep(places, function(e) { return e.name == newPlace.name; } );
+						if (result != null && result.length == 0) { places.push( newPlace ); }
+					}
+				}
+			}
+		}
+	}
+	
+	
+	// addPeople -
+	function addPeople( document ) {
+		if (document.entities != null) {
+			for (var i=0; i < document.entities.length; i++) {
+				if (document.entities[i].type == "Person") {
+					var newPerson = createEntity( document.entities[i] );
+					
+					if ( people.length == 0 ) { people.push( newPerson ); }
+					else
+					{ 	// Only take new places, don't add duplicates
+						var result = $.grep(people, function(e) { return e.name == newPerson.name; } );
+						if (result != null && result.length == 0) { people.push( newPerson ); }
+					}
+				}
+			}
+		}
+	}
+	
+
+	// createEntity -
+	function createEntity( rawEntity ) {
+		var entity = new Object();
+		entity.name = rawEntity.disambiguated_name;
+		entity.geoTag = rawEntity.geotag;
+		entity.linkData = rawEntity.linkData;
+		entity.dimension = rawEntity.dimension;
+		entity.type = rawEntity.type;
+		entity.signifigance = rawEntity.datasetSignificance;
+		return entity;
+	}
+
+
+</script>
+
